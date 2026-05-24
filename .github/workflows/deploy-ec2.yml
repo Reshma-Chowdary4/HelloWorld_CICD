@@ -52,27 +52,7 @@ jobs:
 
     - name: Restart service on EC2
       run: |
-        ssh -o StrictHostKeyChecking=yes -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} <<EOF
-        set -e
-        DEPLOY_DIR="${{ secrets.DEPLOY_PATH }}"
-        SERVICE_NAME="${{ secrets.SERVICE_NAME }}"
-        mkdir -p "$DEPLOY_DIR"
-        if ls "$DEPLOY_DIR"/*.jar 1> /dev/null 2>&1; then
-          sudo mv "$DEPLOY_DIR"/*.jar "$DEPLOY_DIR"/app.jar || true
-          sudo chmod 644 "$DEPLOY_DIR"/app.jar || true
-        else
-          echo "No jar found in $DEPLOY_DIR"
-          exit 1
-        fi
-        if [ -n "$SERVICE_NAME" ]; then
-          sudo systemctl daemon-reload || true
-          sudo systemctl restart "$SERVICE_NAME"
-          sudo systemctl status "$SERVICE_NAME" --no-pager || true
-        else
-          echo "SERVICE_NAME not set, starting jar manually"
-          sudo nohup java -jar "$DEPLOY_DIR"/app.jar >/var/log/helloworld.log 2>&1 &
-        fi
-EOF
+        ssh -o StrictHostKeyChecking=yes -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "bash -lc 'set -e; DEPLOY_DIR=\"${{ secrets.DEPLOY_PATH }}\"; SERVICE_NAME=\"${{ secrets.SERVICE_NAME }}\"; mkdir -p \"$DEPLOY_DIR\"; if ls \"$DEPLOY_DIR\"/*.jar 1> /dev/null 2>&1; then sudo mv \"$DEPLOY_DIR\"/*.jar \"$DEPLOY_DIR\"/app.jar || true; sudo chmod 644 \"$DEPLOY_DIR\"/app.jar || true; else echo \"No jar found in $DEPLOY_DIR\"; exit 1; fi; if [ -n \"$SERVICE_NAME\" ]; then sudo systemctl daemon-reload || true; sudo systemctl restart \"$SERVICE_NAME\"; sudo systemctl status \"$SERVICE_NAME\" --no-pager || true; else echo \"SERVICE_NAME not set, starting jar manually\"; sudo nohup java -jar \"$DEPLOY_DIR\"/app.jar >/var/log/helloworld.log 2>&1 & fi'"
 
 
 
