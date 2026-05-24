@@ -3,6 +3,7 @@ name: Build and Deploy to EC2
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build-and-deploy:
@@ -29,65 +30,50 @@ jobs:
     - name: Build with Maven
       run: mvn -B -DskipTests package
 
-    - name: Upload artifact to EC2 (SCP)
-      uses: appleboy/scp-action@v0.1.8
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ${{ secrets.EC2_USER }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        port: 22
-        source: target/*.jar
-        target: ${{ secrets.DEPLOY_PATH }}
+    - name: Prepare SSH
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        # Add host to known_hosts to avoid interactive prompt
+        ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts || true
+
+    - name: Upload artifact to EC2 (scp)
+      run: |
+        scp -o StrictHostKeyChecking=yes -i ~/.ssh/id_rsa target/*.jar ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${{ secrets.DEPLOY_PATH }}
 
     - name: Upload environment file to EC2 (optional)
-      uses: appleboy/ssh-action@v0.1.8
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ${{ secrets.EC2_USER }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        port: 22
-        script: |
-          set -e
-          SERVICE_NAME="${{ secrets.SERVICE_NAME }}"
-          # APP_ENVIRONMENT secret should contain lines like VAR=value
-          if [ -n "${{ secrets.APP_ENVIRONMENT }}" ]; then
-            echo "Writing environment file to /etc/default/$SERVICE_NAME"
-            printf "%s\n" "${{ secrets.APP_ENVIRONMENT }}" | sudo tee /etc/default/"$SERVICE_NAME" >/dev/null
-            sudo chmod 640 /etc/default/"$SERVICE_NAME"
-            sudo chown root:root /etc/default/"$SERVICE_NAME"
-          else
-            echo "No APP_ENVIRONMENT secret provided; skipping env file write"
-          fi
+      run: |
+        if [ -n "${{ secrets.APP_ENVIRONMENT }}" ]; then
+          printf "%s\n" "${{ secrets.APP_ENVIRONMENT }}" | ssh -o StrictHostKeyChecking=yes -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} "sudo tee /etc/default/${{ secrets.SERVICE_NAME }} > /dev/null && sudo chmod 640 /etc/default/${{ secrets.SERVICE_NAME }} && sudo chown root:root /etc/default/${{ secrets.SERVICE_NAME }}"
+        else
+          echo "No APP_ENVIRONMENT provided; skipping env upload"
+        fi
 
     - name: Restart service on EC2
-      uses: appleboy/ssh-action@v0.1.8
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ${{ secrets.EC2_USER }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        port: 22
-        script: |
-          set -e
-          DEPLOY_DIR="${{ secrets.DEPLOY_PATH }}"
-          SERVICE_NAME="${{ secrets.SERVICE_NAME }}"
-          # Ensure deploy dir exists (scp action will have uploaded jar to this dir)
-          mkdir -p "$DEPLOY_DIR"
-          # Move uploaded jar to a stable name
-          if ls "$DEPLOY_DIR"/*.jar 1> /dev/null 2>&1; then
-            sudo mv "$DEPLOY_DIR"/*.jar "$DEPLOY_DIR"/app.jar || true
-            sudo chmod 644 "$DEPLOY_DIR"/app.jar || true
-          else
-            echo "No jar found in $DEPLOY_DIR"
-            exit 1
-          fi
-          # Reload systemd and restart the service
-          if [ -n "$SERVICE_NAME" ]; then
-            sudo systemctl daemon-reload || true
-            sudo systemctl restart "$SERVICE_NAME"
-            sudo systemctl status "$SERVICE_NAME" --no-pager
-          else
-            echo "SERVICE_NAME secret is not set. Starting jar manually."
-            sudo nohup java -jar "$DEPLOY_DIR"/app.jar >/var/log/helloworld.log 2>&1 &
-          fi
+      run: |
+        ssh -o StrictHostKeyChecking=yes -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} <<EOF
+        set -e
+        DEPLOY_DIR="${{ secrets.DEPLOY_PATH }}"
+        SERVICE_NAME="${{ secrets.SERVICE_NAME }}"
+        mkdir -p "$DEPLOY_DIR"
+        if ls "$DEPLOY_DIR"/*.jar 1> /dev/null 2>&1; then
+          sudo mv "$DEPLOY_DIR"/*.jar "$DEPLOY_DIR"/app.jar || true
+          sudo chmod 644 "$DEPLOY_DIR"/app.jar || true
+        else
+          echo "No jar found in $DEPLOY_DIR"
+          exit 1
+        fi
+        if [ -n "$SERVICE_NAME" ]; then
+          sudo systemctl daemon-reload || true
+          sudo systemctl restart "$SERVICE_NAME"
+          sudo systemctl status "$SERVICE_NAME" --no-pager || true
+        else
+          echo "SERVICE_NAME not set, starting jar manually"
+          sudo nohup java -jar "$DEPLOY_DIR"/app.jar >/var/log/helloworld.log 2>&1 &
+        fi
+EOF
+
+
 
 
