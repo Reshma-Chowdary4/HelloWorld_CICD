@@ -40,6 +40,33 @@ jobs:
         if [ -z "${{ secrets.DEPLOY_PATH }}" ]; then echo "ERROR: DEPLOY_PATH secret is not set"; exit 1; fi
         echo "All required secrets present. SERVICE_NAME (optional)='${{ secrets.SERVICE_NAME }}'"
 
+    - name: "Debug: secrets presence & basic checks (no values leaked)"
+      run: |
+        set -e
+        echo "Runner: $(uname -a)"
+        # For each secret, print whether it's set and its length (do NOT print the secret value)
+        check() {
+          name=$1
+          val="$2"
+          if [ -n "$val" ]; then
+            echo "$name: set (length=${#val})"
+          else
+            echo "$name: NOT SET"
+          fi
+        }
+        check EC2_HOST "${{ secrets.EC2_HOST }}"
+        check EC2_USER "${{ secrets.EC2_USER }}"
+        # Do not leak SSH_PRIVATE_KEY contents; only show length
+        check SSH_PRIVATE_KEY "${{ secrets.SSH_PRIVATE_KEY }}"
+        check DEPLOY_PATH "${{ secrets.DEPLOY_PATH }}"
+        check SERVICE_NAME "${{ secrets.SERVICE_NAME }}"
+        if [ -n "${{ secrets.DEPLOY_PATH }}" ]; then
+          case "${{ secrets.DEPLOY_PATH }}" in
+            /*) echo "DEPLOY_PATH looks absolute";;
+            *) echo "DEPLOY_PATH does not look absolute";;
+          esac
+        fi
+
     - name: Prepare SSH
       run: |
         mkdir -p ~/.ssh
