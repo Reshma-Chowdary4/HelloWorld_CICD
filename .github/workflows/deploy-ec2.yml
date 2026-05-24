@@ -30,6 +30,15 @@ jobs:
     - name: Build with Maven
       run: mvn -B -DskipTests package
 
+    - name: Validate required secrets
+      run: |
+        # Fail fast with a clear message if any required secret is missing
+        if [ -z "${{ secrets.EC2_HOST }}" ]; then echo "ERROR: EC2_HOST secret is not set"; exit 1; fi
+        if [ -z "${{ secrets.EC2_USER }}" ]; then echo "ERROR: EC2_USER secret is not set"; exit 1; fi
+        if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then echo "ERROR: SSH_PRIVATE_KEY secret is not set"; exit 1; fi
+        if [ -z "${{ secrets.DEPLOY_PATH }}" ]; then echo "ERROR: DEPLOY_PATH secret is not set"; exit 1; fi
+        echo "All required secrets present. SERVICE_NAME (optional)='${{ secrets.SERVICE_NAME }}'"
+
     - name: Prepare SSH
       run: |
         mkdir -p ~/.ssh
